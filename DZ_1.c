@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <sys/stat.h>
+#include <string.h>
 
 #define ERROR_STRING "Структура архива нарушена.\n"
 //#define DEBUG
@@ -48,26 +50,32 @@ size_t twoPower(size_t p);
 
 int main(int argc, char *argv[]) {
 
-    size_t fileSize = 4096; // Предполагаемый размер файла в байтах
-    uint8_t *byteArray; // сюда будем копировать содержимое файла
-    size_t bytesRead = 0;
-
-    byteArray = malloc(fileSize);
-     
+    if (argc < 2) {
+        printf("Укажите входной файл, заданную кодировку и выходной файл через пробелы.\n");
+        return 0; 
+    }
     FILE *zipFile = fopen(argv[1], "ab+"); // "zipjpeg.jpg"
-
-    if (zipFile != NULL) {
     
-         while (feof(zipFile) == 0) {
-        
-            if ((fileSize - bytesRead) == 0) { // если в предыдущей итерации удалось прочитать всё кол-во байтов из оставшихся по заданному fileSize
-                fileSize *= 2;
-                byteArray = realloc(byteArray, fileSize); // увеличиваем предполагаемый размер файла
-            } 
+    if (zipFile != NULL) {
+         
+         int fileDescriptor = fileno(zipFile);
+         struct stat inputFileInfo; 
+         
+         if(fstat(fileDescriptor, &inputFileInfo) != 0) { 
+            
+            printf("Что-то не так с входным файлом. Попробуйте запустить программу ещё раз.\n");
+            return 0; // ошибки пока обрабатывать не умею, поэтому всегда возвращаю "0"
+            
+         } else if (inputFileInfo.st_size == 0) {
+            
+            printf("Входной файл пустой.\n");
+            return 0;
+         }
+         
+        uint8_t *byteArray = malloc(inputFileInfo.st_size); // сюда будем копировать содержимое файла
+        size_t bytesRead = 0;
 
-            bytesRead += fread(&byteArray[bytesRead], 1, fileSize - bytesRead, zipFile);
-        } 
-
+        bytesRead += fread(&byteArray[bytesRead], 1, inputFileInfo.st_size, zipFile);
         fclose(zipFile);
         
         size_t startAfterImage = getPtrAfterImage(byteArray, bytesRead);
@@ -87,14 +95,14 @@ int main(int argc, char *argv[]) {
             size_t eorcdrCDEntries = 0;
             size_t eorcdrCDOffset;
             
-            for (int i = 0; i < newSizeArray; i++) {
+            for (size_t i = 0; i < newSizeArray; i++) {
             
                 if (zipArrayPtr[i] == P && zipArrayPtr[i + 1] == K && zipArrayPtr[i + 2] == 1 && zipArrayPtr[i + 3] == 2) { // центральный заголовок
                         
                     cdHeaderArray[cdHeaderCount].filenameLength = binToDec(&zipArrayPtr[i + CD_FILE_NAME_LENGTH_OFFSET], LK_NAME_LENGTH_BYTES_COUNT);
                     cdHeaderArray[cdHeaderCount].localFileHeaderOffset = binToDec(&zipArrayPtr[i + CD_LK_HEADER_OFFSET_OFFSET], LK_ADDRESS_BYTES_COUNT);
 
-                    char fileNameArray[cdHeaderArray[cdHeaderCount].filenameLength];
+                    char fileNameArray[cdHeaderArray[cdHeaderCount].filenameLength + 1];
                     binToCharArray(&zipArrayPtr[i + CD_FILE_NAME_OFFSET], cdHeaderArray[cdHeaderCount].filenameLength, fileNameArray);
                     cdHeaderArray[cdHeaderCount].fileNameSum = binToDec(&zipArrayPtr[i + CD_FILE_NAME_OFFSET], cdHeaderArray[cdHeaderCount].filenameLength);
                     
@@ -126,23 +134,24 @@ int main(int argc, char *argv[]) {
                 }
             }
             
-            if (eorcdrCDEntries == 0 || eorcdrCDEntries != 0 && eorcdrCDEntries != cdHeaderCount) {
+            if (eorcdrCDEntries == 0 || (eorcdrCDEntries != 0 && eorcdrCDEntries != cdHeaderCount)) {
                 printf("Архив не найден или структура архива нарушена.\n");
+                free(byteArray);
                 return 0;
              }
         } 
+        
+        free(byteArray);
 
     } else {
         printf("Не удалось открыть файл для прочтения\n");
     } 
-    
-    free(byteArray);
 
 }
 
 void checkLkHeader(cdHeader h, uint8_t *bytePtr) { 
 
-    short filenameLength = binToDec(&bytePtr[h.localFileHeaderOffset + LK_FILE_NAME_LENGTH_OFFSET], LK_NAME_LENGTH_BYTES_COUNT);
+    size_t filenameLength = binToDec(&bytePtr[h.localFileHeaderOffset + LK_FILE_NAME_LENGTH_OFFSET], LK_NAME_LENGTH_BYTES_COUNT);
             
     if (filenameLength == h.filenameLength) {
     
@@ -166,7 +175,7 @@ size_t binToDec(uint8_t *numbers, size_t arraySize) {
     short number;
     size_t p = 0;
     
-    for (int bytes = 0; bytes <= arraySize - 1; bytes++) {
+    for (size_t bytes = 0; bytes <= arraySize - 1; bytes++) {
         
         mask = 1;
         for (int bits = 0; bits <= 7; bits++) {
@@ -198,6 +207,7 @@ size_t twoPower(size_t p) {
 
 void binToCharArray(uint8_t *numbers, size_t arraySize, char *fileName) { // байты-символы сканируются в обратном порядке
 
+    fileName[arraySize] = '\0';
     for (int bytes = arraySize - 1; bytes >= 0; bytes--) {
         fileName[bytes] = numbers[bytes];
     } 
