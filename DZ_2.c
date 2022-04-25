@@ -254,7 +254,7 @@ void bitsToChars(uint8_t value, char* charArray) {
         charArray[charIndex] = value & displayMask ? '1' : '0';
         value <<= 1;
     }
-    charArray[8] = 10;
+    charArray[8] = '\0';
 }
 
 
